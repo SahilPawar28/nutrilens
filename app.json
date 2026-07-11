@@ -1,0 +1,71 @@
+{
+  "expo": {
+    "name": "NutriLens",
+    "slug": "NutriLens",
+    "scheme": "nutrilens",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "NutriLens needs camera access to scan food and labels.",
+        "NSPhotoLibraryUsageDescription": "NutriLens needs photo access to analyze food images."
+      }
+    },
+    "android": {
+      "package": "com.sahilpawar.nutrilens",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "NutriLens needs camera access to scan food and labels."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "NutriLens needs photo access to analyze food images."
+        }
+      ],
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#5AAD7A"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "770159f7-3896-4844-b9d8-2a4387cb5e8f"
+      }
+    },
+    "owner": "sahilpawar666"
+  }
+}
