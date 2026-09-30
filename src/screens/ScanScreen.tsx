@@ -2,29 +2,43 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Image, ActivityIndicator, Alert, ScrollView,
-  Dimensions, Modal, TextInput, KeyboardAvoidingView, Platform
+  Modal, TextInput, KeyboardAvoidingView, Platform, useWindowDimensions
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { doc, getDoc } from 'firebase/firestore';
-import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT } from '../constants/theme';
+import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT, WEB_BREAKPOINT, SIDEBAR_WIDTH } from '../constants/theme';
 import { analyzeFood } from '../services/openrouter';
 import { logMeal } from '../services/mealLogger';
 import { lookupBarcodeProduct } from '../services/barcodeLookup';
 import { db, auth } from '../services/firebase';
 import NutritionResult from '../components/NutritionResult';
 
-const { width, height } = Dimensions.get('window');
+// The camera sensor's native aspect ratio is never 1:1, so a square viewfinder
+// only shows a center crop of the live feed — the captured photo must be
+// cropped to match, or the saved image would include stuff outside the frame.
+async function cropToSquare(photo: { uri: string; width: number; height: number }) {
+  const size = Math.min(photo.width, photo.height);
+  const originX = Math.round((photo.width - size) / 2);
+  const originY = Math.round((photo.height - size) / 2);
+  return manipulateAsync(
+    photo.uri,
+    [{ crop: { originX, originY, width: size, height: size } }],
+    { compress: 0.9, format: SaveFormat.JPEG }
+  );
+}
 
 type Mode = 'I ate this' | 'Should I eat?';
 
 export default function ScanScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && windowWidth - SIDEBAR_WIDTH >= WEB_BREAKPOINT;
   const [permission, requestPermission] = useCameraPermissions();
   const [mode, setMode] = useState<Mode>('I ate this');
-  const [cameraOpen, setCameraOpen] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -46,30 +60,28 @@ export default function ScanScreen({ navigation }: any) {
 
   // ── Camera ────────────────────────────────────────────────────────────────
 
-  const handleOpenCamera = async () => {
+  const handleCapture = async () => {
     if (!permission?.granted) {
       const res = await requestPermission();
       if (!res.granted) {
         Alert.alert('Permission needed', 'Camera permission is required to scan food.');
-        return;
       }
+      return;
     }
-    barcodeHandledRef.current = false;
-    setCameraOpen(true);
-  };
-
-  const handleTakePhoto = async () => {
-    if (cameraRef.current) {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, base64: true });
-      setImageUri(photo.uri);
-      setCameraOpen(false);
+    if (!cameraRef.current) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
+      const cropped = await cropToSquare(photo);
+      barcodeHandledRef.current = true;
+      setImageUri(cropped.uri);
+    } catch {
+      Alert.alert('Capture failed', 'Could not take the photo. Please try again.');
     }
   };
 
   const handleBarcodeScanned = async (scan: { data: string }) => {
     if (barcodeHandledRef.current) return;
     barcodeHandledRef.current = true;
-    setCameraOpen(false);
     setBarcodeLoading(true);
     try {
       const product = await lookupBarcodeProduct(scan.data);
@@ -109,15 +121,17 @@ export default function ScanScreen({ navigation }: any) {
     }
     setLoading(true);
     try {
-      const aiMode = mode === 'I ate this' ? 'ate' : 'should_eat';
-      const analysis = await analyzeFood(imageUri, aiMode, extraDetails || undefined, dietGoal);
+      const analysis = await analyzeFood(imageUri, extraDetails || undefined, dietGoal);
       setResult(analysis);
       setResultVisible(true);
     } catch (error: any) {
       console.log('Analysis error:', error);
+      const notFood = typeof error?.message === 'string' && error.message.includes("doesn't look like food");
       Alert.alert(
-        'Analysis failed',
-        'Could not read this image. Try a clearer photo, better lighting, or add food details using the pencil button.',
+        notFood ? 'Not food or a label' : 'Analysis failed',
+        notFood
+          ? error.message
+          : 'Could not read this image. Try a clearer photo, better lighting, or add food details using the pencil button.',
         [{ text: 'OK' }]
       );
     } finally {
@@ -148,48 +162,13 @@ export default function ScanScreen({ navigation }: any) {
     setImageUri(null);
     setExtraDetails('');
     setResult(null);
+    barcodeHandledRef.current = false;
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-
-      {/* ── Full-screen Camera Modal ── */}
-      <Modal visible={cameraOpen} animationType="slide" statusBarTranslucent>
-        <View style={{ flex: 1, backgroundColor: '#000' }}>
-          <CameraView
-            style={StyleSheet.absoluteFillObject}
-            ref={cameraRef}
-            facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }}
-            onBarcodeScanned={handleBarcodeScanned}
-          />
-
-          {/* Overlay: no dim — transparent so user sees a clean viewfinder */}
-          <View style={styles.cameraOverlay}>
-            {/* Close */}
-            <TouchableOpacity style={styles.cameraClose} onPress={() => setCameraOpen(false)}>
-              <Ionicons name="close" size={28} color={COLORS.white} />
-            </TouchableOpacity>
-
-            {/* Corner-bracket scan frame */}
-            <View style={styles.scanFrame}>
-              <View style={[styles.scanCorner, styles.topLeft]} />
-              <View style={[styles.scanCorner, styles.topRight]} />
-              <View style={[styles.scanCorner, styles.bottomLeft]} />
-              <View style={[styles.scanCorner, styles.bottomRight]} />
-            </View>
-
-            <Text style={styles.cameraHint}>Point at food, a label, or a barcode</Text>
-
-            {/* Capture button */}
-            <TouchableOpacity style={styles.captureBtn} onPress={handleTakePhoto}>
-              <View style={styles.captureInner} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* ── Barcode Lookup Loading ── */}
       <Modal visible={barcodeLoading} transparent animationType="fade">
@@ -257,12 +236,16 @@ export default function ScanScreen({ navigation }: any) {
 
       {/* ── Main UI ── */}
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: TAB_BAR_HEIGHT + SPACING.lg }]}
+        contentContainerStyle={[
+          styles.content,
+          isDesktop && styles.desktopContent,
+          { paddingBottom: isDesktop ? SPACING.xl : TAB_BAR_HEIGHT + SPACING.lg },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
         <Text style={styles.title}>Scan Food</Text>
-        <Text style={styles.subtitle}>Take a photo or upload from gallery</Text>
+        <Text style={styles.subtitle}>{isDesktop ? 'Upload a photo' : 'Take a photo or upload from gallery'}</Text>
 
         {/* Mode Toggle */}
         <View style={styles.toggleContainer}>
@@ -289,20 +272,39 @@ export default function ScanScreen({ navigation }: any) {
                 <Text style={styles.retakeText}>Retake</Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            /* Live camera preview inline — tapping opens full camera */
+          ) : isDesktop ? (
+            /* Desktop: a webcam photo isn't a realistic path here, so this is
+               a plain upload dropzone instead of a live camera preview. */
             <TouchableOpacity
-              style={styles.cameraPreviewBox}
-              onPress={handleOpenCamera}
-              activeOpacity={0.9}
+              style={styles.uploadBox}
+              onPress={handleGallery}
+              activeOpacity={0.8}
             >
+              <Ionicons name="cloud-upload-outline" size={48} color={COLORS.primary} />
+              <Text style={styles.uploadBoxTitle}>Click to upload a photo</Text>
+              <Text style={styles.uploadBoxSubtitle}>A meal photo, or a packaged food's nutrition label</Text>
+            </TouchableOpacity>
+          ) : (
+            /* Live camera preview inline, cropped to a square — only this
+               square region is what actually gets captured. */
+            <View style={styles.cameraPreviewBox}>
               {permission?.granted ? (
-                <CameraView style={StyleSheet.absoluteFillObject} facing="back" />
+                <CameraView
+                  style={StyleSheet.absoluteFillObject}
+                  ref={cameraRef}
+                  facing="back"
+                  barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }}
+                  onBarcodeScanned={handleBarcodeScanned}
+                />
               ) : (
-                <View style={styles.cameraPermissionBox}>
+                <TouchableOpacity
+                  style={styles.cameraPermissionBox}
+                  onPress={requestPermission}
+                  activeOpacity={0.8}
+                >
                   <Ionicons name="camera-outline" size={44} color={COLORS.textSecondary} />
                   <Text style={styles.permissionText}>Tap to enable camera</Text>
-                </View>
+                </TouchableOpacity>
               )}
 
               {/* Overlay corners on the preview */}
@@ -310,24 +312,21 @@ export default function ScanScreen({ navigation }: any) {
               <View style={styles.previewCornerTR} />
               <View style={styles.previewCornerBL} />
               <View style={styles.previewCornerBR} />
-
-              <View style={styles.previewTapHint}>
-                <Ionicons name="camera" size={18} color={COLORS.white} />
-                <Text style={styles.previewTapText}>Tap to open camera</Text>
-              </View>
-            </TouchableOpacity>
+            </View>
           )}
         </View>
 
-        {/* ── Input Row: Gallery | Camera | Details ── */}
+        {/* ── Input Row: Gallery | Camera (mobile only) | Details ── */}
         <View style={styles.inputRow}>
           <TouchableOpacity style={styles.inputBtn} onPress={handleGallery}>
             <Ionicons name="cloud-upload-outline" size={22} color={COLORS.textSecondary} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.cameraBtn} onPress={handleOpenCamera}>
-            <Ionicons name="camera" size={28} color={COLORS.white} />
-          </TouchableOpacity>
+          {!isDesktop && (
+            <TouchableOpacity style={styles.cameraBtn} onPress={handleCapture}>
+              <Ionicons name="camera" size={28} color={COLORS.white} />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.inputBtn, extraDetails.length > 0 && styles.inputBtnActive]}
@@ -398,6 +397,11 @@ const CORNER_WIDTH = 3;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   content: { paddingHorizontal: SPACING.md, paddingTop: SPACING.md },
+  desktopContent: {
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
+  },
 
   title: { fontSize: 26, fontWeight: 'bold', color: COLORS.text, marginBottom: 4 },
   subtitle: { fontSize: 13, color: COLORS.textSecondary, marginBottom: SPACING.md },
@@ -427,16 +431,34 @@ const styles = StyleSheet.create({
 
   // ── Image area
   imageArea: { marginBottom: SPACING.md },
+  uploadBox: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: RADIUS.lg,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    padding: SPACING.lg,
+  },
+  uploadBoxTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginTop: SPACING.xs },
+  uploadBoxSubtitle: { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center' },
   cameraPreviewBox: {
-    height: height * 0.35,
+    width: '100%',
+    aspectRatio: 1,
     borderRadius: RADIUS.lg,
     overflow: 'hidden',
     backgroundColor: '#111',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
   },
   cameraPermissionBox: {
     flex: 1,
+    width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
     gap: SPACING.sm,
@@ -457,28 +479,20 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary, borderTopRightRadius: 6,
   },
   previewCornerBL: {
-    position: 'absolute', bottom: 50, left: 14,
+    position: 'absolute', bottom: 14, left: 14,
     width: CORNER_SIZE, height: CORNER_SIZE,
     borderBottomWidth: CORNER_WIDTH, borderLeftWidth: CORNER_WIDTH,
     borderColor: COLORS.primary, borderBottomLeftRadius: 6,
   },
   previewCornerBR: {
-    position: 'absolute', bottom: 50, right: 14,
+    position: 'absolute', bottom: 14, right: 14,
     width: CORNER_SIZE, height: CORNER_SIZE,
     borderBottomWidth: CORNER_WIDTH, borderRightWidth: CORNER_WIDTH,
     borderColor: COLORS.primary, borderBottomRightRadius: 6,
   },
-  previewTapHint: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: RADIUS.full,
-    marginBottom: SPACING.md,
-  },
-  previewTapText: { color: COLORS.white, fontSize: 13, fontWeight: '600' },
 
   imagePreviewWrapper: { borderRadius: RADIUS.lg, overflow: 'hidden', position: 'relative' },
-  imagePreview: { width: '100%', height: height * 0.35, borderRadius: RADIUS.lg },
+  imagePreview: { width: '100%', aspectRatio: 1, borderRadius: RADIUS.lg },
   retakeBtn: {
     position: 'absolute', bottom: SPACING.md, right: SPACING.md,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -530,34 +544,6 @@ const styles = StyleSheet.create({
     padding: SPACING.md, flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
   },
   infoText: { flex: 1, fontSize: 13, color: COLORS.primaryDark, lineHeight: 18 },
-
-  // ── Full camera modal overlay (transparent — shows the viewfinder)
-  cameraOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  cameraClose: {
-    alignSelf: 'flex-end', marginRight: SPACING.lg,
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: RADIUS.full, padding: SPACING.sm,
-  },
-  scanFrame: { width: 260, height: 260, position: 'relative' },
-  scanCorner: { position: 'absolute', width: 34, height: 34, borderColor: COLORS.primary },
-  topLeft: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 8 },
-  topRight: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 8 },
-  bottomLeft: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 8 },
-  bottomRight: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 8 },
-  cameraHint: { color: COLORS.white, fontSize: 15, fontWeight: '500' },
-  captureBtn: {
-    width: 76, height: 76, borderRadius: 38,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 3, borderColor: COLORS.white,
-  },
-  captureInner: {
-    width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.white,
-  },
 
   // ── Barcode loading overlay
   barcodeLoadingOverlay: {

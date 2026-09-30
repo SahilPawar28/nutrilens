@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Dimensions, RefreshControl, ActivityIndicator
+  TouchableOpacity, Dimensions, RefreshControl, ActivityIndicator,
+  Platform, useWindowDimensions
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { collection, query, orderBy, limit, onSnapshot, doc, getDoc } from 'firebase/firestore';
@@ -9,14 +10,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { db, auth } from '../services/firebase';
-import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT } from '../constants/theme';
+import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT, WEB_BREAKPOINT, SIDEBAR_WIDTH } from '../constants/theme';
 import ProgressRing from '../components/ProgressRing';
 import MacroCard from '../components/MacroCard';
 import FoodIconBox from '../components/FoodIconBox';
 import MealDetailModal from '../components/MealDetailModal';
 import { subscribeToTodayWater, setTodayWaterCount } from '../services/waterLogger';
-import { flushMealQueue, getPendingMealCount, getMealType } from '../services/mealLogger';
-import { getBestRecommendation } from '../services/mealRecommender';
+import { flushMealQueue, getPendingMealCount } from '../services/mealLogger';
 
 const { width } = Dimensions.get('window');
 const WATER_TARGET = 8;
@@ -65,9 +65,10 @@ const biteStyles = StyleSheet.create({
 export default function HomeScreen({ navigation }: any) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && windowWidth - SIDEBAR_WIDTH >= WEB_BREAKPOINT;
   const [todayMeals, setTodayMeals] = useState<any[]>([]);
   const [recentMeals, setRecentMeals] = useState<any[]>([]);
-  const [recentHistory, setRecentHistory] = useState<any[]>([]);
   const [calorieTarget, setCalorieTarget] = useState(2000);
   const [proteinTarget, setProteinTarget] = useState(120);
   const [carbTarget, setCarbTarget] = useState<number | null>(null);
@@ -118,7 +119,7 @@ export default function HomeScreen({ navigation }: any) {
     const q = query(
       collection(db, 'users', currentUser.uid, 'meal_logs'),
       orderBy('logged_at', 'desc'),
-      limit(300)
+      limit(50)
     );
 
     const unsubscribe = onSnapshot(
@@ -133,7 +134,6 @@ export default function HomeScreen({ navigation }: any) {
         });
         setTodayMeals(todayList);
         setRecentMeals(todayList.slice(0, 20));
-        setRecentHistory(all);
         setLoading(false);
         setError(null);
       },
@@ -182,35 +182,6 @@ export default function HomeScreen({ navigation }: any) {
   const resolvedCarbTarget = carbTarget ?? Math.round(calorieTarget * 0.5 / 4);
   const resolvedFatTarget = fatTarget ?? Math.round(calorieTarget * 0.3 / 9);
 
-  const remainingProtein = Math.max(proteinTarget - protein, 0);
-  const todayFoodNames = new Set(todayMeals.map(m => m.food_name));
-  const recommendation = getBestRecommendation(recentHistory, {
-    currentMealType: getMealType(),
-    remainingProtein,
-    remainingCalories: remaining,
-    excludeFoodNames: todayFoodNames,
-  });
-
-  let suggestion: { title: string; subtitle: string } | null = null;
-  if (recommendation) {
-    suggestion = {
-      title: `Try ${recommendation.food_name} again`,
-      subtitle: `You've had it ${recommendation.count}× before (avg ${recommendation.avgProtein}g protein` +
-        (recommendation.avgHealthScore != null ? `, ${recommendation.avgHealthScore.toFixed(1)}/10 health score` : '') +
-        `) — a good fit for what's left of today's targets.`,
-    };
-  } else if (remainingProtein >= 15) {
-    suggestion = {
-      title: `You need ${remainingProtein}g more protein today`,
-      subtitle: 'Try eggs, grilled chicken, paneer, or legumes to close the gap.',
-    };
-  } else if (remaining <= 100 && consumed > 0) {
-    suggestion = {
-      title: "You're close to your calorie goal",
-      subtitle: 'Consider a light snack or hold off until tomorrow.',
-    };
-  }
-
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
@@ -224,7 +195,8 @@ export default function HomeScreen({ navigation }: any) {
       style={styles.container}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: insets.top + SPACING.md, paddingBottom: TAB_BAR_HEIGHT + SPACING.xl },
+        isDesktop && styles.desktopContent,
+        { paddingTop: insets.top + SPACING.md, paddingBottom: isDesktop ? SPACING.xl : TAB_BAR_HEIGHT + SPACING.xl },
       ]}
       showsVerticalScrollIndicator={false}
       refreshControl={
@@ -258,6 +230,8 @@ export default function HomeScreen({ navigation }: any) {
         </View>
       )}
 
+      <View style={isDesktop && styles.desktopColumns}>
+      <View style={isDesktop && styles.desktopColumnLeft}>
       {/* ── Calorie Ring Card ── */}
       <View style={styles.ringCard}>
         <LinearGradient
@@ -341,20 +315,9 @@ export default function HomeScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
       </View>
+      </View>
 
-      {/* ── Smart Suggestion ── */}
-      {suggestion && (
-        <View style={styles.suggestionCard}>
-          <View style={styles.suggestionIconWrapper}>
-            <Ionicons name="bulb" size={18} color={COLORS.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.suggestionTitle}>{suggestion.title}</Text>
-            <Text style={styles.suggestionSubtitle}>{suggestion.subtitle}</Text>
-          </View>
-        </View>
-      )}
-
+      <View style={isDesktop && styles.desktopColumnRight}>
       {/* ── Quick Actions ── */}
       <View style={styles.actionsRow}>
         <TouchableOpacity
@@ -370,13 +333,13 @@ export default function HomeScreen({ navigation }: any) {
 
         <TouchableOpacity
           style={[styles.actionBtn, { backgroundColor: COLORS.macroCarbsBg }]}
-          onPress={() => navigation.navigate('Scan')}
+          onPress={() => navigation.navigate('Analytics')}
           activeOpacity={0.8}
         >
           <View style={[styles.actionIconWrapper, { backgroundColor: COLORS.macroCarbs + '22' }]}>
-            <Ionicons name="pricetag-outline" size={20} color={COLORS.macroCarbs} />
+            <Ionicons name="bar-chart-outline" size={20} color={COLORS.macroCarbs} />
           </View>
-          <Text style={[styles.actionLabel, { color: COLORS.macroCarbs }]}>Scan Label</Text>
+          <Text style={[styles.actionLabel, { color: COLORS.macroCarbs }]}>See Analytics</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -405,6 +368,12 @@ export default function HomeScreen({ navigation }: any) {
           <Text style={styles.emptyBitesTitle}>No meals yet today</Text>
           <Text style={styles.emptyBitesSubtitle}>Tap Scan Food to log your first meal</Text>
         </View>
+      ) : isDesktop ? (
+        <View style={styles.bitesGrid}>
+          {recentMeals.map((meal) => (
+            <BiteCard key={meal.id} meal={meal} onPress={() => setSelectedMeal(meal)} />
+          ))}
+        </View>
       ) : (
         <ScrollView
           horizontal
@@ -416,6 +385,8 @@ export default function HomeScreen({ navigation }: any) {
           ))}
         </ScrollView>
       )}
+      </View>
+      </View>
 
       <MealDetailModal
         visible={!!selectedMeal}
@@ -430,6 +401,30 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   content: { paddingHorizontal: SPACING.md },
   loadingContainer: { justifyContent: 'center', alignItems: 'center' },
+
+  // Desktop layout
+  desktopContent: {
+    width: '100%',
+    maxWidth: 1100,
+    alignSelf: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  desktopColumns: {
+    flexDirection: 'row',
+    gap: SPACING.lg,
+    alignItems: 'flex-start',
+  },
+  desktopColumnLeft: {
+    width: 380,
+  },
+  desktopColumnRight: {
+    flex: 1,
+  },
+  bitesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
 
   errorBanner: {
     flexDirection: 'row',
@@ -566,29 +561,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
-  // Suggestion
-  suggestionCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: SPACING.sm,
-    backgroundColor: COLORS.primaryLight,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.primary,
-  },
-  suggestionIconWrapper: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  suggestionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.primaryDark },
-  suggestionSubtitle: { fontSize: 12, color: COLORS.text, marginTop: 2, lineHeight: 17 },
 
   // Actions
   actionsRow: {

@@ -2,15 +2,16 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput,
   TouchableOpacity, Platform, ActivityIndicator,
-  ScrollView, KeyboardAvoidingView, Keyboard
+  ScrollView, KeyboardAvoidingView, Keyboard, Image
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { collection, query, orderBy, limit, where, onSnapshot, getDocs, addDoc, deleteDoc, doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 import { db, auth } from '../services/firebase';
-import { MODEL } from '../services/openrouter';
+import { MODEL, imageToBase64 } from '../services/openrouter';
 import { getTodayWaterCount } from '../services/waterLogger';
 import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT } from '../constants/theme';
 
@@ -22,6 +23,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  imageUri?: string;
 }
 
 const QUICK_PROMPTS = [
@@ -86,7 +88,25 @@ Eaten today: ${summarizeMeals(todayMeals)}
 Eaten yesterday: ${summarizeMeals(yesterdayMeals)}`;
 }
 
-async function askNutriLensAI(messages: { role: string; content: string }[], userContext: string): Promise<string> {
+async function askNutriLensAI(
+  messages: { role: string; content: string }[],
+  userContext: string,
+  imageBase64?: string
+): Promise<string> {
+  // Only the current turn's image matters — prior turns stay plain text.
+  const apiMessages = imageBase64
+    ? [
+        ...messages.slice(0, -1),
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
+            { type: 'text', text: messages[messages.length - 1]?.content || 'What can you tell me about this food?' },
+          ],
+        },
+      ]
+    : messages;
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -109,7 +129,7 @@ Respond directly with your answer only — never narrate your reasoning, never e
 
 ${userContext}`,
         },
-        ...messages,
+        ...apiMessages,
       ],
       max_tokens: 700,
       reasoning: { effort: 'low', exclude: true },
@@ -122,25 +142,29 @@ ${userContext}`,
   return cleanReply(raw);
 }
 
+function AppLogo({ size = 34 }: { size?: number }) {
+  return (
+    <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }}>
+      <Image source={require('../../assets/icon.png')} style={{ width: '100%', height: '100%' }} />
+    </View>
+  );
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
 
   return (
     <View style={[styles.messageRow, isUser && styles.messageRowUser]}>
-      {!isUser && (
-        <LinearGradient
-          colors={[COLORS.primary, COLORS.primaryDark]}
-          style={styles.aiAvatar}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <Text style={styles.aiAvatarEmoji}>🌿</Text>
-        </LinearGradient>
-      )}
+      {!isUser && <AppLogo size={34} />}
       <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAI]}>
-        <Text style={[styles.bubbleText, isUser && styles.bubbleTextUser]}>
-          {message.content}
-        </Text>
+        {message.imageUri && (
+          <Image source={{ uri: message.imageUri }} style={styles.bubbleImage} />
+        )}
+        {!!message.content && (
+          <Text style={[styles.bubbleText, isUser && styles.bubbleTextUser]}>
+            {message.content}
+          </Text>
+        )}
         <Text style={[styles.bubbleTime, isUser && styles.bubbleTimeUser]}>
           {message.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
         </Text>
@@ -164,7 +188,18 @@ export default function ChatScreen() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+
+  const handlePickImage = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+    });
+    if (!res.canceled) {
+      setAttachedImage(res.assets[0].uri);
+    }
+  };
 
   const messages = [greeting, ...history];
 
@@ -222,19 +257,22 @@ export default function ChatScreen() {
   };
 
   const handleSend = async (text?: string) => {
-    const messageText = text || input.trim();
-    if (!messageText || loading) return;
+    const imageUri = attachedImage;
+    const messageText = text || input.trim() || (imageUri ? 'What can you tell me about this food?' : '');
+    if ((!messageText && !imageUri) || loading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: messageText,
       timestamp: new Date(),
+      imageUri: imageUri || undefined,
     };
 
     setHistory(prev => [...prev, userMessage]);
     persistMessage(userMessage);
     setInput('');
+    setAttachedImage(null);
     setLoading(true);
 
     try {
@@ -244,7 +282,8 @@ export default function ChatScreen() {
       }));
       const currentUser = auth.currentUser;
       const userContext = currentUser ? await buildUserContext(currentUser.uid).catch(() => '') : '';
-      const reply = await askNutriLensAI(chatHistory, userContext);
+      const imageBase64 = imageUri ? await imageToBase64(imageUri) : undefined;
+      const reply = await askNutriLensAI(chatHistory, userContext, imageBase64);
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -279,14 +318,7 @@ export default function ChatScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <LinearGradient
-            colors={[COLORS.primary, COLORS.primaryDark]}
-            style={styles.headerAvatar}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Text style={styles.headerAvatarEmoji}>🌿</Text>
-          </LinearGradient>
+          <AppLogo size={42} />
           <View>
             <Text style={styles.headerTitle}>NutriLens AI</Text>
             <View style={styles.headerStatusRow}>
@@ -312,12 +344,7 @@ export default function ChatScreen() {
         ListFooterComponent={
           loading ? (
             <View style={styles.typingIndicator}>
-              <LinearGradient
-                colors={[COLORS.primary, COLORS.primaryDark]}
-                style={styles.aiAvatar}
-              >
-                <Text style={styles.aiAvatarEmoji}>🌿</Text>
-              </LinearGradient>
+              <AppLogo size={34} />
               <View style={styles.typingBubble}>
                 <ActivityIndicator size="small" color={COLORS.primary} />
                 <Text style={styles.typingText}>Thinking...</Text>
@@ -346,27 +373,39 @@ export default function ChatScreen() {
       )}
 
       {/* Input Bar */}
-      <View style={[styles.inputBar, { paddingBottom: keyboardVisible ? SPACING.sm : TAB_BAR_HEIGHT + 42 }]}>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="image-outline" size={20} color={COLORS.textSecondary} />
-          <TextInput
-            style={styles.input}
-            value={input}
-            onChangeText={setInput}
-            placeholder="Ask about any food..."
-            placeholderTextColor={COLORS.textSecondary}
-            multiline
-            maxLength={500}
-          />
+      <View style={[styles.inputBar, { paddingBottom: keyboardVisible ? SPACING.sm : TAB_BAR_HEIGHT }]}>
+        {attachedImage && (
+          <View style={styles.attachedPreviewRow}>
+            <Image source={{ uri: attachedImage }} style={styles.attachedThumb} />
+            <TouchableOpacity style={styles.attachedRemoveBtn} onPress={() => setAttachedImage(null)}>
+              <Ionicons name="close-circle" size={20} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
+        <View style={styles.inputRow}>
+          <View style={styles.inputWrapper}>
+            <TouchableOpacity onPress={handlePickImage}>
+              <Ionicons name="image-outline" size={20} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+            <TextInput
+              style={styles.input}
+              value={input}
+              onChangeText={setInput}
+              placeholder="Ask about any food..."
+              placeholderTextColor={COLORS.textSecondary}
+              multiline
+              maxLength={500}
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.sendBtn, (!input.trim() && !attachedImage || loading) && styles.sendBtnDisabled]}
+            onPress={() => handleSend()}
+            disabled={(!input.trim() && !attachedImage) || loading}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="send" size={18} color={COLORS.white} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
-          onPress={() => handleSend()}
-          disabled={!input.trim() || loading}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="send" size={18} color={COLORS.white} />
-        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
@@ -394,14 +433,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.sm,
   },
-  headerAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerAvatarEmoji: { fontSize: 20 },
   headerTitle: {
     fontSize: 16,
     fontWeight: '800',
@@ -447,14 +478,6 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   messageRowUser: { flexDirection: 'row-reverse' },
-  aiAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  aiAvatarEmoji: { fontSize: 16 },
   bubble: {
     maxWidth: '75%',
     borderRadius: RADIUS.lg,
@@ -480,6 +503,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 6,
   },
+  bubbleImage: { width: 180, height: 180, borderRadius: RADIUS.md, marginBottom: 4 },
   bubbleText: { fontSize: 14, color: COLORS.text, lineHeight: 21 },
   bubbleTextUser: { color: COLORS.white },
   bubbleTime: { fontSize: 10, color: COLORS.textSecondary, alignSelf: 'flex-end' },
@@ -524,14 +548,30 @@ const styles = StyleSheet.create({
 
   // Input bar
   inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.sm,
     backgroundColor: COLORS.white,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     gap: SPACING.sm,
+  },
+  attachedPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  attachedThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: RADIUS.md,
+  },
+  attachedRemoveBtn: {
+    padding: 2,
   },
   inputWrapper: {
     flex: 1,

@@ -25,3 +25,9 @@ export const COLORS = {
 export const SPACING = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 };
 export const RADIUS = { sm: 8, md: 14, lg: 22, xl: 28, full: 999 };
 export const TAB_BAR_HEIGHT = 70;
+
+// Web-only: above this width the app switches from the mobile layout to a
+// desktop one (sidebar nav, multi-column content) instead of just stretching
+// the phone UI.
+export const WEB_BREAKPOINT = 900;
+export const SIDEBAR_WIDTH = 240;

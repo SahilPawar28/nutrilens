@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, Switch, Alert, Modal,
-  TextInput, ActivityIndicator
+  TextInput, ActivityIndicator, Platform, Linking
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { collection, query, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
@@ -12,6 +12,7 @@ import { db, auth } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
 import { enableMealReminders, disableMealReminders } from '../services/notifications';
 import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT } from '../constants/theme';
+import { confirmAction } from '../utils/confirm';
 
 const DIET_GOALS = ['Weight Loss', 'Muscle Gain', 'Maintenance', 'Healthy Eating', 'Low Carb'];
 
@@ -209,10 +210,7 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert('Log Out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: logout },
-    ]);
+    confirmAction('Log Out', 'Are you sure you want to log out?', 'Log Out', logout);
   };
 
   return (
@@ -322,7 +320,12 @@ export default function ProfileScreen() {
             if (val) {
               const granted = await enableMealReminders();
               if (!granted) {
-                Alert.alert('Permission needed', 'Enable notifications for NutriLens in your device settings to get daily meal reminders.');
+                Alert.alert(
+                  'Permission needed',
+                  Platform.OS === 'web'
+                    ? 'Notifications were blocked. Allow them for this site in your browser settings to get daily meal reminders.'
+                    : 'Enable notifications for NutriLens in your device settings to get daily meal reminders.'
+                );
                 return;
               }
             } else {
@@ -343,6 +346,21 @@ export default function ProfileScreen() {
           label="Email"
           value={user?.email?.split('@')[0] + '...'}
         />
+        {Platform.OS === 'web' && (
+          <>
+            <View style={styles.divider} />
+            <TouchableOpacity
+              style={styles.logoutRow}
+              onPress={() => Linking.openURL('/downloads/nutrilens-android.bin')}
+              activeOpacity={0.8}
+            >
+              <LinearGradient colors={[COLORS.primary, COLORS.primaryDark]} style={styles.settingIconWrapper} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                <Ionicons name="logo-android" size={17} color={COLORS.white} />
+              </LinearGradient>
+              <Text style={[styles.logoutText, { color: COLORS.text }]}>Download Android App</Text>
+            </TouchableOpacity>
+          </>
+        )}
         <View style={styles.divider} />
         <TouchableOpacity style={styles.logoutRow} onPress={handleLogout} activeOpacity={0.8}>
           <LinearGradient colors={[COLORS.danger, '#A03020']} style={styles.settingIconWrapper} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>

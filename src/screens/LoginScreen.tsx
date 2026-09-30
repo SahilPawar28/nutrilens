@@ -2,12 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView,
-  Platform, ScrollView, Animated,
+  Platform, ScrollView, Animated, Image, useWindowDimensions, Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../context/AuthContext';
-import { COLORS, SPACING, RADIUS } from '../constants/theme';
+import { COLORS, SPACING, RADIUS, WEB_BREAKPOINT } from '../constants/theme';
 
 const FOOD_EMOJIS = ['🥑', '🍓', '🫐', '🥦', '🍎', '🥗', '🍊', '🥕'];
 
@@ -37,8 +38,21 @@ function isGmail(email: string) {
   return email.trim().toLowerCase().endsWith('@gmail.com');
 }
 
+function GoogleGIcon({ size = 18 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 48 48">
+      <Path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z" />
+      <Path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+      <Path fill="#4CAF50" d="M24 44c5.5 0 10.5-2.1 14.3-5.6l-6.6-5.6C29.7 34.4 27 35.3 24 35.3c-5.2 0-9.6-3.3-11.3-8l-6.6 5.1C9.6 39.6 16.3 44 24 44z" />
+      <Path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4.1 5.8l6.6 5.6C39.6 37.5 44 31.8 44 24c0-1.3-.1-2.7-.4-3.5z" />
+    </Svg>
+  );
+}
+
 export default function LoginScreen() {
   const { login, signup, signInWithGoogle } = useAuth();
+  const { width } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && width >= WEB_BREAKPOINT;
   const [isLogin, setIsLogin] = useState(true);
 
   // Login fields
@@ -139,6 +153,199 @@ export default function LoginScreen() {
     { bottom: 28, left: 75 }, { top: 50, right: 16 },
   ];
 
+  const floatingEmojis = FOOD_EMOJIS.map((emoji, i) => {
+    const y = floatAnims[i].interpolate({ inputRange: [0, 1], outputRange: [0, -10] });
+    return (
+      <Animated.Text key={i} style={[styles.floatEmoji, floatPositions[i], { transform: [{ translateY: y }] }]}>
+        {emoji}
+      </Animated.Text>
+    );
+  });
+
+  // Shared between the mobile stacked layout and the desktop split layout —
+  // only the surrounding shell differs.
+  const formFields = (
+    <View style={styles.form}>
+
+      {/* Phone (signup only) */}
+      {!isLogin && (
+        <View style={styles.inputWrapper}>
+          <Ionicons name="call-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="Phone number"
+            placeholderTextColor={COLORS.textSecondary}
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+          />
+        </View>
+      )}
+
+      {/* Email */}
+      <View style={styles.inputWrapper}>
+        <Ionicons name="mail-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
+        <TextInput
+          style={styles.input}
+          placeholder="Gmail address"
+          placeholderTextColor={COLORS.textSecondary}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+      </View>
+
+      {/* Password */}
+      <View style={styles.inputWrapper}>
+        <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor={COLORS.textSecondary}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry={!showPassword}
+        />
+        <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+          <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={18} color={COLORS.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Confirm password (signup only) */}
+      {!isLogin && (
+        <View style={styles.inputWrapper}>
+          <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="Confirm password"
+            placeholderTextColor={COLORS.textSecondary}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry={!showConfirm}
+          />
+          <TouchableOpacity onPress={() => setShowConfirm(!showConfirm)} style={styles.eyeBtn}>
+            <Ionicons name={showConfirm ? 'eye-outline' : 'eye-off-outline'} size={18} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Submit */}
+      <TouchableOpacity
+        style={[styles.submitBtn, loading && styles.btnDisabled]}
+        onPress={handleSubmit}
+        disabled={loading}
+        activeOpacity={0.85}
+      >
+        <LinearGradient
+          colors={[COLORS.primary, COLORS.primaryDark]}
+          style={styles.submitBtnGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        >
+          {loading ? (
+            <ActivityIndicator color={COLORS.white} />
+          ) : (
+            <>
+              <Text style={styles.submitBtnText}>{isLogin ? 'Log In' : 'Sign Up'}</Text>
+              <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
+            </>
+          )}
+        </LinearGradient>
+      </TouchableOpacity>
+
+      {/* Google Sign-In — only shown when the native module is actually linked
+          (i.e. a custom dev/production build, not Expo Go or web) */}
+      {googleSignInAvailable && (
+        <>
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.googleBtn, googleLoading && styles.btnDisabled]}
+            onPress={handleGooglePress}
+            disabled={googleLoading}
+            activeOpacity={0.85}
+          >
+            {googleLoading ? (
+              <ActivityIndicator color={COLORS.text} />
+            ) : (
+              <>
+                <GoogleGIcon size={18} />
+                <Text style={styles.googleBtnText}>Continue with Google</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Switch mode */}
+      <TouchableOpacity style={styles.toggleBtn} onPress={switchMode} activeOpacity={0.7}>
+        <Text style={styles.toggleText}>
+          {isLogin ? "Don't have an account? " : 'Already have an account? '}
+          <Text style={styles.toggleLink}>{isLogin ? 'Sign Up' : 'Log In'}</Text>
+        </Text>
+      </TouchableOpacity>
+
+      {Platform.OS === 'web' && (
+        <TouchableOpacity
+          style={styles.apkDownloadBtn}
+          onPress={() => Linking.openURL('/downloads/nutrilens-android.bin')}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="logo-android" size={16} color={COLORS.textSecondary} />
+          <Text style={styles.apkDownloadText}>Download the NutriLens Android app</Text>
+        </TouchableOpacity>
+      )}
+
+    </View>
+  );
+
+  if (isDesktop) {
+    return (
+      <View style={styles.desktopSplit}>
+        {/* Left: branding panel */}
+        <LinearGradient colors={['#E8F5EE', '#F9F7F0']} style={styles.desktopBrandPanel} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          {floatingEmojis}
+          <View style={styles.logoWrapper}>
+            <View style={styles.desktopLogoBg}>
+              <Image source={require('../../assets/icon.png')} style={styles.logoImage} />
+            </View>
+            <Text style={styles.desktopLogoText}>NutriLens</Text>
+            <Text style={styles.desktopLogoTagline}>Your AI nutrition companion</Text>
+            <Text style={styles.desktopBlurb}>
+              Snap a photo of any meal or nutrition label and get instant calorie and macro
+              breakdowns, personalized recommendations, and effortless daily tracking.
+            </Text>
+          </View>
+        </LinearGradient>
+
+        {/* Right: form panel */}
+        <KeyboardAvoidingView style={styles.desktopFormPanel} behavior="padding">
+          <ScrollView
+            contentContainerStyle={styles.desktopFormScroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.desktopFormCard}>
+              <Text style={styles.title}>{isLogin ? 'Welcome back' : 'Create account'}</Text>
+              <Text style={styles.subtitle}>
+                {isLogin ? 'Log in with your Gmail account' : 'Sign up with your Gmail account'}
+              </Text>
+              <View style={styles.gmailBadge}>
+                <Text style={styles.gmailBadgeText}>🔒 Gmail accounts only</Text>
+              </View>
+              {formFields}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -151,18 +358,11 @@ export default function LoginScreen() {
       >
         {/* Hero */}
         <LinearGradient colors={['#E8F5EE', '#F9F7F0']} style={styles.hero} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-          {FOOD_EMOJIS.map((emoji, i) => {
-            const y = floatAnims[i].interpolate({ inputRange: [0, 1], outputRange: [0, -10] });
-            return (
-              <Animated.Text key={i} style={[styles.floatEmoji, floatPositions[i], { transform: [{ translateY: y }] }]}>
-                {emoji}
-              </Animated.Text>
-            );
-          })}
+          {floatingEmojis}
           <View style={styles.logoWrapper}>
-            <LinearGradient colors={[COLORS.primary, COLORS.primaryDark]} style={styles.logoBg} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-              <Text style={styles.logoEmoji}>🌿</Text>
-            </LinearGradient>
+            <View style={styles.logoBg}>
+              <Image source={require('../../assets/icon.png')} style={styles.logoImage} />
+            </View>
             <Text style={styles.logoText}>NutriLens</Text>
             <Text style={styles.logoTagline}>Your AI nutrition companion</Text>
           </View>
@@ -180,132 +380,7 @@ export default function LoginScreen() {
             <Text style={styles.gmailBadgeText}>🔒 Gmail accounts only</Text>
           </View>
 
-          <View style={styles.form}>
-
-            {/* Phone (signup only) */}
-            {!isLogin && (
-              <View style={styles.inputWrapper}>
-                <Ionicons name="call-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Phone number"
-                  placeholderTextColor={COLORS.textSecondary}
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-              </View>
-            )}
-
-            {/* Email */}
-            <View style={styles.inputWrapper}>
-              <Ionicons name="mail-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Gmail address"
-                placeholderTextColor={COLORS.textSecondary}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-
-            {/* Password */}
-            <View style={styles.inputWrapper}>
-              <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor={COLORS.textSecondary}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
-                <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={18} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Confirm password (signup only) */}
-            {!isLogin && (
-              <View style={styles.inputWrapper}>
-                <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirm password"
-                  placeholderTextColor={COLORS.textSecondary}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry={!showConfirm}
-                />
-                <TouchableOpacity onPress={() => setShowConfirm(!showConfirm)} style={styles.eyeBtn}>
-                  <Ionicons name={showConfirm ? 'eye-outline' : 'eye-off-outline'} size={18} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Submit */}
-            <TouchableOpacity
-              style={[styles.submitBtn, loading && styles.btnDisabled]}
-              onPress={handleSubmit}
-              disabled={loading}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={[COLORS.primary, COLORS.primaryDark]}
-                style={styles.submitBtnGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                {loading ? (
-                  <ActivityIndicator color={COLORS.white} />
-                ) : (
-                  <>
-                    <Text style={styles.submitBtnText}>{isLogin ? 'Log In' : 'Sign Up'}</Text>
-                    <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-
-            {/* Google Sign-In — only shown when the native module is actually linked
-                (i.e. a custom dev/production build, not Expo Go or web) */}
-            {googleSignInAvailable && (
-              <>
-                <View style={styles.divider}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>or</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.googleBtn, googleLoading && styles.btnDisabled]}
-                  onPress={handleGooglePress}
-                  disabled={googleLoading}
-                  activeOpacity={0.85}
-                >
-                  {googleLoading ? (
-                    <ActivityIndicator color={COLORS.text} />
-                  ) : (
-                    <>
-                      <Text style={styles.googleIcon}>G</Text>
-                      <Text style={styles.googleBtnText}>Continue with Google</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* Switch mode */}
-            <TouchableOpacity style={styles.toggleBtn} onPress={switchMode} activeOpacity={0.7}>
-              <Text style={styles.toggleText}>
-                {isLogin ? "Don't have an account? " : 'Already have an account? '}
-                <Text style={styles.toggleLink}>{isLogin ? 'Sign Up' : 'Log In'}</Text>
-              </Text>
-            </TouchableOpacity>
-
-          </View>
+          {formFields}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -315,6 +390,49 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   scroll: { flexGrow: 1 },
+
+  // ── Desktop split layout ──
+  desktopSplit: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: COLORS.background,
+  },
+  desktopBrandPanel: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.xl,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  desktopLogoBg: {
+    width: 96, height: 96, borderRadius: 48,
+    justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden',
+    shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4, shadowRadius: 16, elevation: 8,
+  },
+  desktopLogoText: { fontSize: 34, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5, marginTop: 4 },
+  desktopLogoTagline: { fontSize: 15, color: COLORS.textSecondary, fontWeight: '500' },
+  desktopBlurb: {
+    fontSize: 14, color: COLORS.textSecondary, fontWeight: '500',
+    textAlign: 'center', lineHeight: 21, maxWidth: 360, marginTop: SPACING.lg,
+  },
+  desktopFormPanel: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  desktopFormScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.xl,
+  },
+  desktopFormCard: {
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+  },
 
   hero: {
     height: 240,
@@ -328,10 +446,11 @@ const styles = StyleSheet.create({
   logoBg: {
     width: 72, height: 72, borderRadius: 36,
     justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden',
     shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 12, elevation: 8,
   },
-  logoEmoji: { fontSize: 32 },
+  logoImage: { width: '100%', height: '100%' },
   logoText: { fontSize: 26, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
   logoTagline: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
 
@@ -418,15 +537,18 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 6,
   },
-  googleIcon: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#4285F4',
-    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
-  },
   googleBtnText: { fontSize: 15, color: COLORS.text, fontWeight: '600' },
 
   toggleBtn: { alignItems: 'center' },
   toggleText: { textAlign: 'center', color: COLORS.textSecondary, fontSize: 14, fontWeight: '500' },
   toggleLink: { color: COLORS.primary, fontWeight: '700' },
+  apkDownloadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  apkDownloadText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '600' },
 });

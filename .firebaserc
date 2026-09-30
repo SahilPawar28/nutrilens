@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "nutrilens-e0de6"
+  },
+  "targets": {
+    "nutrilens-e0de6": {
+      "hosting": {
+        "primary": [
+          "mynutrilens"
+        ],
+        "legacy": [
+          "nutrilens-e0de6"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -41,6 +41,9 @@ yarn-error.*
 /ios
 /android
 
+# Firebase CLI local cache
+.firebase/
+
 # Claude Code local state
 .claude/worktrees/
 .claude/scheduled_tasks.lock

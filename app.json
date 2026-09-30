@@ -22,10 +22,8 @@
     "android": {
       "package": "com.sahilpawar.nutrilens",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#338256",
+        "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -66,6 +64,12 @@
         "projectId": "770159f7-3896-4844-b9d8-2a4387cb5e8f"
       }
     },
-    "owner": "sahilpawar666"
+    "owner": "sahilpawar666",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/770159f7-3896-4844-b9d8-2a4387cb5e8f"
+    }
   }
 }

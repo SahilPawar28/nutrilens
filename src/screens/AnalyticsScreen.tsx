@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  Dimensions, ActivityIndicator, TouchableOpacity, Share
+  ActivityIndicator, TouchableOpacity, Share,
+  Platform, useWindowDimensions
 } from 'react-native';
 import { BarChart, PieChart } from 'react-native-chart-kit';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,10 +10,9 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc } from 'firebase/fi
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { db, auth } from '../services/firebase';
-import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT } from '../constants/theme';
+import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT, WEB_BREAKPOINT, SIDEBAR_WIDTH } from '../constants/theme';
 
-const { width } = Dimensions.get('window');
-const CHART_WIDTH = width - SPACING.md * 2;
+const DESKTOP_CONTENT_MAX_WIDTH = 1000;
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -93,6 +93,13 @@ function InsightCard({ icon, text, color, bgColor }: InsightCardProps) {
 
 export default function AnalyticsScreen() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && windowWidth - SIDEBAR_WIDTH >= WEB_BREAKPOINT;
+  const contentWidth = isDesktop
+    ? Math.min(windowWidth - SIDEBAR_WIDTH, DESKTOP_CONTENT_MAX_WIDTH)
+    : windowWidth;
+  // Side-by-side on desktop, so each chart only gets half the content width.
+  const chartWidth = (isDesktop ? contentWidth / 2 - SPACING.xl : contentWidth) - SPACING.md * 2 - SPACING.md * 2;
   const [meals, setMeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('7D');
@@ -270,7 +277,8 @@ export default function AnalyticsScreen() {
       style={styles.container}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: insets.top + SPACING.md, paddingBottom: TAB_BAR_HEIGHT + SPACING.lg },
+        isDesktop && styles.desktopContent,
+        { paddingTop: insets.top + SPACING.md, paddingBottom: isDesktop ? SPACING.lg : TAB_BAR_HEIGHT + SPACING.lg },
       ]}
       showsVerticalScrollIndicator={false}
     >
@@ -317,8 +325,9 @@ export default function AnalyticsScreen() {
         </View>
       </View>
 
+      <View style={isDesktop ? styles.desktopChartsRow : undefined}>
       {/* Calorie Chart */}
-      <View style={styles.chartCard}>
+      <View style={[styles.chartCard, isDesktop && styles.desktopChartCard]}>
         <View style={styles.chartHeader}>
           <Text style={styles.chartTitle}>Calories</Text>
           <View style={styles.chartBadge}>
@@ -333,7 +342,7 @@ export default function AnalyticsScreen() {
         ) : (
           <BarChart
             data={chartData}
-            width={CHART_WIDTH - SPACING.md * 2}
+            width={chartWidth}
             height={180}
             yAxisLabel=""
             yAxisSuffix=""
@@ -359,7 +368,7 @@ export default function AnalyticsScreen() {
       </View>
 
       {/* Macro Breakdown */}
-      <View style={styles.chartCard}>
+      <View style={[styles.chartCard, isDesktop && styles.desktopChartCard]}>
         <View style={styles.chartHeader}>
           <Text style={styles.chartTitle}>Macro Breakdown</Text>
         </View>
@@ -371,7 +380,7 @@ export default function AnalyticsScreen() {
         ) : (
           <PieChart
             data={macroPieData}
-            width={CHART_WIDTH - SPACING.md * 2}
+            width={chartWidth}
             height={160}
             chartConfig={{
               color: () => COLORS.text,
@@ -382,6 +391,7 @@ export default function AnalyticsScreen() {
             absolute={false}
           />
         )}
+      </View>
       </View>
 
       {/* Stat Cards */}
@@ -431,6 +441,19 @@ export default function AnalyticsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   content: { paddingHorizontal: SPACING.md },
+  desktopContent: {
+    width: '100%',
+    maxWidth: 1000,
+    alignSelf: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  desktopChartsRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+  },
+  desktopChartCard: {
+    flex: 1,
+  },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
 
   titleRow: {

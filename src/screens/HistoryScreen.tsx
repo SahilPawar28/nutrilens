@@ -1,16 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, SectionList,
-  TouchableOpacity, ActivityIndicator, RefreshControl
+  TouchableOpacity, ActivityIndicator, RefreshControl,
+  Platform, useWindowDimensions
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { db, auth } from '../services/firebase';
-import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT } from '../constants/theme';
+import { COLORS, SPACING, RADIUS, TAB_BAR_HEIGHT, WEB_BREAKPOINT, SIDEBAR_WIDTH } from '../constants/theme';
 import MealCard from '../components/MealCard';
 import MealDetailModal from '../components/MealDetailModal';
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 function getLocalDateKey(date: Date): string {
   const y = date.getFullYear();
@@ -61,15 +68,39 @@ function DaySectionHeader({ title, dayCalories }: { title: string; dayCalories: 
   );
 }
 
+function isInDateRange(timestamp: any, range: string): boolean {
+  if (range === 'All') return true;
+  if (!timestamp) return false;
+  const d = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  const now = new Date();
+  if (range === 'Today') return getLocalDateKey(d) === getLocalDateKey(now);
+  if (range === 'This Week') {
+    const weekAgo = new Date(now);
+    weekAgo.setDate(now.getDate() - 7);
+    return d >= weekAgo;
+  }
+  if (range === 'This Month') {
+    const monthAgo = new Date(now);
+    monthAgo.setDate(now.getDate() - 30);
+    return d >= monthAgo;
+  }
+  return true;
+}
+
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && windowWidth - SIDEBAR_WIDTH >= WEB_BREAKPOINT;
+  const columns = isDesktop ? 2 : 1;
   const [meals, setMeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<string>('All');
+  const [dateFilter, setDateFilter] = useState<string>('All');
   const [selectedMeal, setSelectedMeal] = useState<any>(null);
 
   const FILTERS = ['All', 'Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  const DATE_FILTERS = ['Today', 'This Week', 'This Month', 'All'];
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -90,9 +121,9 @@ export default function HistoryScreen() {
     return unsubscribe;
   }, []);
 
-  const filteredMeals = filter === 'All'
-    ? meals
-    : meals.filter(m => m.meal_type === filter);
+  const filteredMeals = meals.filter(m =>
+    (filter === 'All' || m.meal_type === filter) && isInDateRange(m.logged_at, dateFilter)
+  );
 
   const groupedByDay: { [key: string]: any[] } = {};
   filteredMeals.forEach(meal => {
@@ -106,16 +137,17 @@ export default function HistoryScreen() {
     .map(dateKey => ({
       dateKey,
       title: formatDateLabel(dateKey),
-      data: groupedByDay[dateKey],
+      data: chunk(groupedByDay[dateKey], columns),
       dayCalories: groupedByDay[dateKey].reduce((s: number, m: any) => s + (m.calories || 0), 0),
     }));
 
-  const uniqueDays = Object.keys(groupedByDay).length || 1;
-  const totalCalories = filteredMeals.reduce((s, m) => s + (m.calories || 0), 0);
-  const totalProtein = filteredMeals.reduce((s, m) => s + (m.protein || 0), 0);
-  const avgCalPerDay = Math.round(totalCalories / uniqueDays);
-  const avgProteinPerDay = Math.round(totalProtein / uniqueDays);
-  const avgCalPerMeal = Math.round(totalCalories / (filteredMeals.length || 1));
+  // The summary bar always reflects today's actual intake, independent of
+  // whichever meal-type/date filters are applied to the list below.
+  const todayKey = getLocalDateKey(new Date());
+  const todaysMeals = meals.filter(m => getDateKey(m.logged_at) === todayKey);
+  const todayCalories = todaysMeals.reduce((s, m) => s + (m.calories || 0), 0);
+  const todayProtein = todaysMeals.reduce((s, m) => s + (m.protein || 0), 0);
+  const todayMealCount = todaysMeals.length;
 
   if (loading) {
     return (
@@ -127,6 +159,7 @@ export default function HistoryScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={isDesktop ? styles.desktopWrapper : styles.flexFill}>
 
       {/* Header */}
       <View style={styles.header}>
@@ -145,27 +178,41 @@ export default function HistoryScreen() {
         </LinearGradient>
       </View>
 
-      {/* Summary Bar */}
-      {filteredMeals.length > 0 && (
-        <View style={styles.summaryBar}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{avgCalPerDay}</Text>
-            <Text style={styles.summaryLabel}>avg kcal/day</Text>
-          </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{avgProteinPerDay}g</Text>
-            <Text style={styles.summaryLabel}>avg protein/day</Text>
-          </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{avgCalPerMeal}</Text>
-            <Text style={styles.summaryLabel}>avg kcal/meal</Text>
-          </View>
+      {/* Summary Bar — always today's actual intake */}
+      <View style={styles.summaryBar}>
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryValue}>{todayCalories}</Text>
+          <Text style={styles.summaryLabel}>kcal today</Text>
         </View>
-      )}
+        <View style={styles.summaryDivider} />
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryValue}>{todayProtein}g</Text>
+          <Text style={styles.summaryLabel}>protein today</Text>
+        </View>
+        <View style={styles.summaryDivider} />
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryValue}>{todayMealCount}</Text>
+          <Text style={styles.summaryLabel}>meals today</Text>
+        </View>
+      </View>
 
-      {/* Filter Tabs */}
+      {/* Date Range Filter */}
+      <View style={styles.filterRow}>
+        {DATE_FILTERS.map(f => (
+          <TouchableOpacity
+            key={f}
+            style={[styles.filterBtn, dateFilter === f && styles.filterBtnActive]}
+            onPress={() => setDateFilter(f)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.filterText, dateFilter === f && styles.filterTextActive]}>
+              {f}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Meal Type Filter */}
       <View style={styles.filterRow}>
         {FILTERS.map(f => (
           <TouchableOpacity
@@ -193,19 +240,27 @@ export default function HistoryScreen() {
       ) : (
         <SectionList
           sections={sections}
-          keyExtractor={item => item.id}
-          renderItem={({ item, index }) => (
-            <TouchableOpacity activeOpacity={0.7} onPress={() => setSelectedMeal(item)}>
-              <MealCard
-                foodName={item.food_name}
-                emoji={item.emoji}
-                calories={item.calories}
-                protein={item.protein}
-                mealType={item.meal_type}
-                time={formatTime(item.logged_at)}
-                index={index}
-              />
-            </TouchableOpacity>
+          keyExtractor={row => row.map((m: any) => m.id).join('-')}
+          renderItem={({ item: row }) => (
+            <View style={isDesktop ? styles.mealRow : undefined}>
+              {row.map((meal: any) => (
+                <TouchableOpacity
+                  key={meal.id}
+                  activeOpacity={0.7}
+                  onPress={() => setSelectedMeal(meal)}
+                  style={isDesktop ? styles.mealRowItem : undefined}
+                >
+                  <MealCard
+                    foodName={meal.food_name}
+                    emoji={meal.emoji}
+                    calories={meal.calories}
+                    protein={meal.protein}
+                    mealType={meal.meal_type}
+                    time={formatTime(meal.logged_at)}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
           renderSectionHeader={({ section }) => (
             <DaySectionHeader title={section.title} dayCalories={section.dayCalories} />
@@ -226,6 +281,7 @@ export default function HistoryScreen() {
           stickySectionHeadersEnabled={false}
         />
       )}
+      </View>
 
       <MealDetailModal
         visible={!!selectedMeal}
@@ -239,6 +295,20 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
+  flexFill: { flex: 1 },
+  desktopWrapper: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 1000,
+    alignSelf: 'center',
+  },
+  mealRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  mealRowItem: {
+    flex: 1,
+  },
 
   // Header
   header: {

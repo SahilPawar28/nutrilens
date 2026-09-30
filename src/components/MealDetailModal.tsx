@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS } from '../constants/theme';
 import { updateMeal, deleteMeal } from '../services/mealLogger';
 import FoodIconBox from './FoodIconBox';
+import { confirmAction } from '../utils/confirm';
 
 const MEAL_TYPES = ['Breakfast', 'Lunch', 'Snack', 'Dinner'];
 
@@ -67,19 +68,14 @@ export default function MealDetailModal({ visible, meal, onClose }: Props) {
   };
 
   const handleDelete = () => {
-    Alert.alert('Delete meal', `Remove "${meal.food_name}" from your log?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          try {
-            await deleteMeal(meal.id);
-            onClose();
-          } catch (e) {
-            Alert.alert('Error', 'Could not delete meal.');
-          }
-        }
-      },
-    ]);
+    confirmAction('Delete meal', `Remove "${meal.food_name}" from your log?`, 'Delete', async () => {
+      try {
+        await deleteMeal(meal.id);
+        onClose();
+      } catch (e) {
+        Alert.alert('Error', 'Could not delete meal.');
+      }
+    });
   };
 
   const NUTRITION_FIELDS = [

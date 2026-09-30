@@ -1,8 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { ActivityIndicator, View, Text, Image, TouchableOpacity, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import LoginScreen from '../screens/LoginScreen';
@@ -12,105 +12,109 @@ import ScanScreen from '../screens/ScanScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ChatScreen from '../screens/ChatScreen';
-import { COLORS } from '../constants/theme';
-import { Platform } from 'react-native';
+import { COLORS, SPACING, RADIUS, WEB_BREAKPOINT, SIDEBAR_WIDTH } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
+const ROUTE_ICONS: Record<string, (focused: boolean) => any> = {
+  Home: (f) => (f ? 'home' : 'home-outline'),
+  History: (f) => (f ? 'time' : 'time-outline'),
+  Scan: () => 'scan',
+  Chat: (f) => (f ? 'chatbubble' : 'chatbubble-outline'),
+  Analytics: (f) => (f ? 'bar-chart' : 'bar-chart-outline'),
+  Profile: (f) => (f ? 'person' : 'person-outline'),
+};
+
 function ScanButton({ onPress }: any) {
-  const pulse = useRef(new Animated.Value(1)).current;
-  const glow = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(pulse, { toValue: 1.12, duration: 900, useNativeDriver: true }),
-          Animated.timing(glow, { toValue: 1, duration: 900, useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-          Animated.timing(glow, { toValue: 0, duration: 900, useNativeDriver: true }),
-        ]),
-      ])
-    ).start();
-  }, []);
-
-  const glowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.65] });
-  const glowScale = pulse.interpolate({ inputRange: [1, 1.12], outputRange: [1, 1.4] });
-
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.scanBtnContainer}>
-      {/* Glow ring */}
-      <Animated.View
-        style={[
-          styles.scanGlow,
-          { opacity: glowOpacity, transform: [{ scale: glowScale }] },
-        ]}
-      />
-      {/* Button */}
-      <Animated.View style={[styles.scanButton, { transform: [{ scale: pulse }] }]}>
+      <View style={styles.scanButton}>
         <Ionicons name="scan" size={26} color={COLORS.white} />
-      </Animated.View>
+      </View>
     </TouchableOpacity>
   );
 }
 
-function MainTabs() {
+// One custom tab bar that renders as the usual bottom bar on mobile, and as
+// a left sidebar on wide desktop browsers — same navigation state driving
+// both, just a different shape.
+function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && width >= WEB_BREAKPOINT;
+
+  const items = state.routes.map((route, index) => {
+    const isFocused = state.index === index;
+    const onPress = () => {
+      const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+      if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
+    };
+    const iconName = ROUTE_ICONS[route.name]?.(isFocused) ?? 'ellipse-outline';
+    return { route, isFocused, onPress, iconName };
+  });
+
+  if (isDesktop) {
+    return (
+      <View style={[styles.sidebar, { paddingTop: insets.top + SPACING.lg }]}>
+        <View style={styles.sidebarBrand}>
+          <Image source={require('../../assets/icon.png')} style={styles.sidebarLogo} />
+          <Text style={styles.sidebarBrandText}>NutriLens</Text>
+        </View>
+        <View style={styles.sidebarItems}>
+          {items.map(({ route, isFocused, onPress, iconName }) => (
+            <TouchableOpacity
+              key={route.key}
+              onPress={onPress}
+              activeOpacity={0.8}
+              style={[styles.sidebarItem, isFocused && styles.sidebarItemActive]}
+            >
+              <Ionicons name={iconName} size={20} color={isFocused ? COLORS.primary : COLORS.textSecondary} />
+              <Text style={[styles.sidebarItemText, isFocused && styles.sidebarItemTextActive]}>
+                {route.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.bottomBar, { height: 56 + insets.bottom, paddingBottom: insets.bottom + 4 }]}>
+      {items.map(({ route, isFocused, onPress, iconName }) => {
+        if (route.name === 'Scan') {
+          return <ScanButton key={route.key} onPress={onPress} />;
+        }
+        return (
+          <TouchableOpacity key={route.key} onPress={onPress} activeOpacity={0.7} style={styles.bottomBarItem}>
+            <Ionicons name={iconName} size={22} color={isFocused ? COLORS.primary : COLORS.textSecondary} />
+            <Text style={[styles.bottomBarLabel, { color: isFocused ? COLORS.primary : COLORS.textSecondary }]}>
+              {route.name}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+function MainTabs() {
+  const { width } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && width >= WEB_BREAKPOINT;
 
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
+      tabBar={(props) => <CustomTabBar {...props} />}
+      screenOptions={{
         headerShown: false,
-        tabBarShowLabel: true,
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textSecondary,
-        tabBarStyle: {
-          backgroundColor: COLORS.white,
-          borderTopColor: COLORS.border,
-          borderTopWidth: 0.5,
-          height: 56 + insets.bottom,
-          paddingBottom: insets.bottom + 4,
-          paddingTop: 6,
-          elevation: 16,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.1,
-          shadowRadius: 12,
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-        },
-        tabBarIcon: ({ color, size, focused }) => {
-          const icons: any = {
-            Home: focused ? 'home' : 'home-outline',
-            History: focused ? 'time' : 'time-outline',
-            Scan: 'scan',
-            Chat: focused ? 'chatbubble' : 'chatbubble-outline',
-            Analytics: focused ? 'bar-chart' : 'bar-chart-outline',
-            Profile: focused ? 'person' : 'person-outline',
-          };
-          return <Ionicons name={icons[route.name]} size={size} color={color} />;
-        },
-      })}
+        sceneStyle: isDesktop ? { marginLeft: SIDEBAR_WIDTH } : undefined,
+      }}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="History" component={HistoryScreen} />
-      <Tab.Screen
-        name="Scan"
-        component={ScanScreen}
-        options={{
-          tabBarButton: (props) => <ScanButton onPress={props.onPress} />,
-        }}
-      />
+      <Tab.Screen name="Scan" component={ScanScreen} />
       <Tab.Screen name="Chat" component={ChatScreen} />
       <Tab.Screen name="Analytics" component={AnalyticsScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
@@ -143,19 +147,39 @@ export default function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
+  // ── Mobile bottom bar ──
+  bottomBar: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.white,
+    borderTopColor: COLORS.border,
+    borderTopWidth: 0.5,
+    paddingTop: 6,
+    elevation: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  bottomBarItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  bottomBarLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   scanBtnContainer: {
+    flex: 1,
     width: 64,
-    height: 64,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-  },
-  scanGlow: {
-    position: 'absolute',
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: COLORS.primary,
   },
   scanButton: {
     width: 62,
@@ -164,12 +188,63 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 10,
-    borderWidth: 3,
-    borderColor: COLORS.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+
+  // ── Desktop sidebar ──
+  sidebar: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: COLORS.white,
+    borderRightWidth: 1,
+    borderRightColor: COLORS.border,
+    paddingHorizontal: SPACING.md,
+  },
+  sidebarBrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.xl,
+    paddingHorizontal: SPACING.sm,
+  },
+  sidebarLogo: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+  },
+  sidebarBrandText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  sidebarItems: {
+    gap: 2,
+  },
+  sidebarItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.sm + 2,
+    borderRadius: RADIUS.md,
+  },
+  sidebarItemActive: {
+    backgroundColor: COLORS.primaryLight,
+  },
+  sidebarItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  sidebarItemTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
   },
 });

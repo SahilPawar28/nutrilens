@@ -6,12 +6,36 @@ const NUTRISCORE_TO_HEALTH_SCORE: Record<string, number> = {
   a: 9, b: 7, c: 5, d: 3, e: 1,
 };
 
-export async function lookupBarcodeProduct(barcode: string): Promise<any | null> {
+// Scanners and OFF's own database don't always agree on which barcode format
+// a product is indexed under — a 12-digit UPC-A is frequently stored as a
+// 13-digit EAN with a leading zero, or vice versa. Trying these variants
+// meaningfully cuts down "scanned fine but nothing found" false negatives.
+function barcodeVariants(code: string): string[] {
+  const digits = code.replace(/\D/g, '');
+  const variants = new Set<string>([digits]);
+
+  if (digits.length === 12) variants.add('0' + digits);
+  if (digits.length === 13 && digits.startsWith('0')) variants.add(digits.slice(1));
+  if (digits.length === 8) variants.add('00000' + digits);
+  if (digits.length === 13) variants.add('0' + digits);
+
+  return Array.from(variants);
+}
+
+async function fetchProduct(barcode: string): Promise<any | null> {
   const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
   const data = await response.json();
   if (data.status !== 1 || !data.product) return null;
+  return data.product;
+}
 
-  const p = data.product;
+export async function lookupBarcodeProduct(barcode: string): Promise<any | null> {
+  let p: any = null;
+  for (const variant of barcodeVariants(barcode)) {
+    p = await fetchProduct(variant);
+    if (p) break;
+  }
+  if (!p) return null;
   const n = p.nutriments || {};
   const grade = (p.nutriscore_grade || '').toLowerCase();
 
