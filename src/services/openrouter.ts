@@ -1,9 +1,23 @@
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
 const BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
 export const MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+
+// expo-file-system's readAsStringAsync isn't implemented on web — only the
+// FileReader/blob path works there, so the two platforms need separate reads.
+function readAsBase64Web(uri: string): Promise<string> {
+  return fetch(uri)
+    .then(res => res.blob())
+    .then(blob => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(',')[1] || '');
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    }));
+}
 
 // Resize/compress before upload — full-res camera photos add real latency
 // (larger base64 payloads) with no accuracy benefit for this model.
@@ -13,6 +27,7 @@ export async function imageToBase64(uri: string): Promise<string> {
     [{ resize: { width: 1024 } }],
     { compress: 0.7, format: SaveFormat.JPEG }
   );
+  if (Platform.OS === 'web') return readAsBase64Web(compressed.uri);
   return FileSystem.readAsStringAsync(compressed.uri, { encoding: 'base64' as any });
 }
 
