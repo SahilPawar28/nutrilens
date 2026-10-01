@@ -292,7 +292,8 @@ export default function ChatScreen() {
       };
       setHistory(prev => [...prev, aiMessage]);
       persistMessage(aiMessage);
-    } catch {
+    } catch (error) {
+      console.log('Chat error:', error);
       setHistory(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
